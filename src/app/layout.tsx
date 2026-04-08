@@ -2,7 +2,7 @@ import type {Metadata} from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Ruovaf Smile Tally',
+  title: 'Afu & Ruovaf Smile Tally',
   description: 'Share your smiles with your partner',
 };
 

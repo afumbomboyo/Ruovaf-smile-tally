@@ -8,6 +8,7 @@ export interface SmileRecord {
 export interface PartnerData {
   id: PartnerId;
   name: string;
+  password?: string; // New field for password protection
   isVisible: boolean;
   smileHistory: Record<string, number>; // date -> count
 }
