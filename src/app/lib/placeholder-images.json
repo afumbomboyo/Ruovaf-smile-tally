@@ -1,0 +1,10 @@
+{
+  "placeholderImages": [
+    {
+      "id": "hero-loving",
+      "description": "A warm and loving couple sharing a happy moment.",
+      "imageUrl": "https://picsum.photos/seed/loving1/800/600",
+      "imageHint": "happy couple"
+    }
+  ]
+}
