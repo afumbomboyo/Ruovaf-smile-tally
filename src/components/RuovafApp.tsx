@@ -129,13 +129,9 @@ export default function RuovafApp() {
   };
 
   const handlePartnerSelect = (id: PartnerId) => {
-    const partner = state.partners[id];
     setTempId(id);
     setPasswordInput('');
     setConfirmPasswordInput('');
-    
-    // If no password set, we'll show the setup screen
-    // If password exists, we'll show the login screen
   };
 
   const handleAuth = () => {
@@ -213,8 +209,8 @@ export default function RuovafApp() {
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-8 fade-in">
           <div className="text-center space-y-2">
-            <div className="mx-auto bg-primary/10 w-20 h-20 rounded-full flex items-center justify-center mb-6">
-              <Heart className="w-10 h-10 text-primary animate-pulse" />
+            <div className="mx-auto bg-primary/10 w-32 h-32 rounded-full flex items-center justify-center mb-6">
+              <Heart className="w-16 h-16 text-primary animate-pulse fill-primary/20" />
             </div>
             <h1 className="text-4xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
             <p className="text-muted-foreground">
@@ -301,7 +297,7 @@ export default function RuovafApp() {
       </header>
 
       <main className="max-w-md mx-auto p-4 space-y-6">
-        {/* Main Action Counter - Lower Z-Index to scroll under header */}
+        {/* Main Action Counter */}
         <section className="text-center space-y-6 pt-4 relative z-0">
           <div className="relative inline-block">
             <button
