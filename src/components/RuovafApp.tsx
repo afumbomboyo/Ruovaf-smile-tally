@@ -64,19 +64,18 @@ export default function RuovafApp() {
     }
   }, [user, isAuthLoading]);
 
-  // Firestore Data - Afu
+  // Firestore Data References - These should only depend on coupleName to be available for auth
   const afuRef = useMemoFirebase(() => {
-    if (!user || !coupleName) return null;
+    if (!coupleName) return null;
     return doc(db, 'partners', `${coupleName}_afu`);
-  }, [db, user, coupleName]);
-  const { data: afuData, isLoading: isLoadingAfu } = useDoc(afuRef);
+  }, [db, coupleName]);
+  const { data: afuData } = useDoc(afuRef);
 
-  // Firestore Data - Ruovaf
   const ruovafRef = useMemoFirebase(() => {
-    if (!user || !coupleName) return null;
+    if (!coupleName) return null;
     return doc(db, 'partners', `${coupleName}_ruovaf`);
-  }, [db, user, coupleName]);
-  const { data: ruovafData, isLoading: isLoadingRuovaf } = useDoc(ruovafRef);
+  }, [db, coupleName]);
+  const { data: ruovafData } = useDoc(ruovafRef);
 
   // History for active user
   const historyQuery = useMemoFirebase(() => {
@@ -104,7 +103,7 @@ export default function RuovafApp() {
     
     updateDocumentNonBlocking(currentRef, {
       currentSmileCount: newCount,
-      lastActive: serverTimestamp()
+      lastLoginAt: serverTimestamp()
     });
 
     const historyRef = doc(db, 'partners', `${coupleName}_${activeRole}`, 'dailySmileRecords', today);
@@ -163,7 +162,8 @@ export default function RuovafApp() {
         currentSmileCount: 0,
         visibilityEnabled: true,
         createdAt: serverTimestamp(),
-        lastActive: serverTimestamp()
+        lastLoginAt: serverTimestamp(),
+        partneredWithId: tempRole === 'afu' ? 'ruovaf' : 'afu'
       }, { merge: true });
 
       setActiveRole(tempRole);
@@ -174,7 +174,7 @@ export default function RuovafApp() {
         setActiveRole(tempRole);
         setIsAuthenticated(true);
         setTempRole(null);
-        updateDocumentNonBlocking(roleRef, { lastActive: serverTimestamp() });
+        updateDocumentNonBlocking(roleRef, { lastLoginAt: serverTimestamp() });
       } else {
         toast({ variant: "destructive", title: "Access Denied", description: "Incorrect password." });
       }
