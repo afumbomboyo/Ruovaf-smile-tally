@@ -1,7 +1,7 @@
+
 "use client"
 
 import React, { useState, useEffect } from 'react';
-import { PartnerId, AppState, PartnerData } from '@/app/lib/types';
 import { generateLovingPrompt } from '@/ai/flows/ai-generated-smile-prompt';
 import { 
   Heart, 
@@ -14,8 +14,7 @@ import {
   ArrowLeft,
   Sparkles,
   ChevronRight,
-  Lock,
-  KeyRound
+  Lock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -27,82 +26,85 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
+import { 
+  useFirestore, 
+  useDoc, 
+  useCollection,
+  useMemoFirebase,
+  setDocumentNonBlocking,
+  updateDocumentNonBlocking,
+  initiateAnonymousSignIn,
+  useUser
+} from '@/firebase';
+import { doc, collection, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 
-const STORAGE_KEY = 'ruovaf-smile-tally-v2';
-
-const INITIAL_STATE: AppState = {
-  partners: {
-    'partner-1': {
-      id: 'partner-1',
-      name: 'Partner One',
-      isVisible: true,
-      smileHistory: {}
-    },
-    'partner-2': {
-      id: 'partner-2',
-      name: 'Partner Two',
-      isVisible: true,
-      smileHistory: {}
-    }
-  }
-};
+type PartnerRole = 'afu' | 'ruovaf';
 
 export default function RuovafApp() {
   const { toast } = useToast();
-  const [activePartnerId, setActivePartnerId] = useState<PartnerId | null>(null);
+  const db = useFirestore();
+  const { user } = useUser();
+  const [activeRole, setActiveRole] = useState<PartnerRole | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [state, setState] = useState<AppState>(INITIAL_STATE);
-  const [isHydrated, setIsHydrated] = useState(false);
   const [aiPrompt, setAiPrompt] = useState<string | null>(null);
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
 
   // Auth/Setup form state
-  const [tempId, setTempId] = useState<PartnerId | null>(null);
+  const [tempRole, setTempRole] = useState<PartnerRole | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
 
-  // Load from localStorage
+  // Firebase Auth - Anonymous sign-in for Firestore access
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        setState(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse saved state", e);
-      }
+    const { auth } = require('@/firebase');
+    if (auth && !user) {
+      initiateAnonymousSignIn(auth);
     }
-    setIsHydrated(true);
-  }, []);
+  }, [user]);
 
-  // Save to localStorage
-  useEffect(() => {
-    if (isHydrated) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }
-  }, [state, isHydrated]);
+  // Firestore Data - Afu
+  const afuRef = useMemoFirebase(() => doc(db, 'partners', 'afu'), [db]);
+  const { data: afuData, isLoading: isLoadingAfu } = useDoc(afuRef);
+
+  // Firestore Data - Ruovaf
+  const ruovafRef = useMemoFirebase(() => doc(db, 'partners', 'ruovaf'), [db]);
+  const { data: ruovafData, isLoading: isLoadingRuovaf } = useDoc(ruovafRef);
+
+  // History for active user
+  const historyQuery = useMemoFirebase(() => {
+    if (!activeRole) return null;
+    return query(
+      collection(db, 'partners', activeRole, 'dailySmileRecords'),
+      orderBy('recordDate', 'desc'),
+      limit(30)
+    );
+  }, [db, activeRole]);
+  const { data: smileHistory } = useCollection(historyQuery);
 
   const getTodayStr = () => new Date().toISOString().split('T')[0];
 
   const handleIncrement = async () => {
-    if (!activePartnerId || !isAuthenticated) return;
+    if (!activeRole || !isAuthenticated) return;
 
     const today = getTodayStr();
-    setState(prev => {
-      const partner = prev.partners[activePartnerId];
-      const newHistory = { ...partner.smileHistory };
-      newHistory[today] = (newHistory[today] || 0) + 1;
+    const currentRef = activeRole === 'afu' ? afuRef : ruovafRef;
+    const currentData = activeRole === 'afu' ? afuData : ruovafData;
 
-      return {
-        ...prev,
-        partners: {
-          ...prev.partners,
-          [activePartnerId]: {
-            ...partner,
-            smileHistory: newHistory
-          }
-        }
-      };
+    const newCount = (currentData?.currentSmileCount || 0) + 1;
+    
+    // Update main count
+    updateDocumentNonBlocking(currentRef, {
+      currentSmileCount: newCount,
+      lastActive: serverTimestamp()
     });
+
+    // Update historical record
+    const historyRef = doc(db, 'partners', activeRole, 'dailySmileRecords', today);
+    setDocumentNonBlocking(historyRef, {
+      recordDate: today,
+      smileCount: newCount,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
 
     setIsLoadingPrompt(true);
     try {
@@ -115,30 +117,28 @@ export default function RuovafApp() {
     }
   };
 
-  const toggleVisibility = (id: PartnerId) => {
-    setState(prev => ({
-      ...prev,
-      partners: {
-        ...prev.partners,
-        [id]: {
-          ...prev.partners[id],
-          isVisible: !prev.partners[id].isVisible
-        }
-      }
-    }));
+  const toggleVisibility = () => {
+    if (!activeRole) return;
+    const currentRef = activeRole === 'afu' ? afuRef : ruovafRef;
+    const currentData = activeRole === 'afu' ? afuData : ruovafData;
+    
+    updateDocumentNonBlocking(currentRef, {
+      visibilityEnabled: !currentData?.visibilityEnabled
+    });
   };
 
-  const handlePartnerSelect = (id: PartnerId) => {
-    setTempId(id);
+  const handlePartnerSelect = (role: PartnerRole) => {
+    setTempRole(role);
     setPasswordInput('');
     setConfirmPasswordInput('');
   };
 
   const handleAuth = () => {
-    if (!tempId) return;
-    const partner = state.partners[tempId];
+    if (!tempRole) return;
+    const roleData = tempRole === 'afu' ? afuData : ruovafData;
+    const roleRef = tempRole === 'afu' ? afuRef : ruovafRef;
 
-    if (!partner.password) {
+    if (!roleData || !roleData.password) {
       // First time setup
       if (passwordInput.length < 4) {
         toast({ variant: "destructive", title: "Error", description: "Password must be at least 4 characters." });
@@ -149,22 +149,26 @@ export default function RuovafApp() {
         return;
       }
 
-      setState(prev => ({
-        ...prev,
-        partners: {
-          ...prev.partners,
-          [tempId]: { ...prev.partners[tempId], password: passwordInput }
-        }
-      }));
-      setActivePartnerId(tempId);
+      setDocumentNonBlocking(roleRef, {
+        id: tempRole,
+        displayName: tempRole === 'afu' ? 'Afu' : 'Ruovaf',
+        password: passwordInput,
+        currentSmileCount: 0,
+        visibilityEnabled: true,
+        createdAt: serverTimestamp(),
+        lastActive: serverTimestamp()
+      }, { merge: true });
+
+      setActiveRole(tempRole);
       setIsAuthenticated(true);
-      setTempId(null);
+      setTempRole(null);
     } else {
       // Login
-      if (passwordInput === partner.password) {
-        setActivePartnerId(tempId);
+      if (passwordInput === roleData.password) {
+        setActiveRole(tempRole);
         setIsAuthenticated(true);
-        setTempId(null);
+        setTempRole(null);
+        updateDocumentNonBlocking(roleRef, { lastActive: serverTimestamp() });
       } else {
         toast({ variant: "destructive", title: "Access Denied", description: "Incorrect password." });
       }
@@ -172,7 +176,9 @@ export default function RuovafApp() {
   };
 
   const handlePasswordChange = () => {
-    if (!activePartnerId) return;
+    if (!activeRole) return;
+    const roleRef = activeRole === 'afu' ? afuRef : ruovafRef;
+
     if (passwordInput.length < 4) {
       toast({ variant: "destructive", title: "Error", description: "Password must be at least 4 characters." });
       return;
@@ -182,26 +188,24 @@ export default function RuovafApp() {
       return;
     }
 
-    setState(prev => ({
-      ...prev,
-      partners: {
-        ...prev.partners,
-        [activePartnerId]: { ...prev.partners[activePartnerId], password: passwordInput }
-      }
-    }));
+    updateDocumentNonBlocking(roleRef, { password: passwordInput });
     toast({ title: "Success", description: "Password updated successfully." });
     setPasswordInput('');
     setConfirmPasswordInput('');
   };
 
   const handleLogout = () => {
-    setActivePartnerId(null);
+    setActiveRole(null);
     setIsAuthenticated(false);
     setAiPrompt(null);
-    setTempId(null);
+    setTempRole(null);
   };
 
-  if (!isHydrated) return null;
+  if (isLoadingAfu || isLoadingRuovaf) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+    </div>
+  );
 
   // Authentication or Selection Screen
   if (!isAuthenticated) {
@@ -209,38 +213,52 @@ export default function RuovafApp() {
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-8 fade-in">
           <div className="text-center space-y-2">
-            <div className="mx-auto bg-primary/10 w-32 h-32 rounded-full flex items-center justify-center mb-6">
-              <Heart className="w-16 h-16 text-primary animate-pulse fill-primary/20" />
+            <div className="mx-auto bg-primary/10 w-48 h-48 rounded-full flex items-center justify-center mb-8 shadow-inner">
+              <Heart className="w-24 h-24 text-primary animate-pulse fill-primary/20" />
             </div>
             <h1 className="text-4xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
             <p className="text-muted-foreground">
-              {tempId ? `Secure access for ${state.partners[tempId].name}` : "Welcome! Who is checking in?"}
+              {tempRole ? `Secure access for ${tempRole === 'afu' ? 'Afu' : 'Ruovaf'}` : "Welcome! Who is checking in?"}
             </p>
           </div>
 
-          {!tempId ? (
+          {!tempRole ? (
             <div className="grid gap-4">
-              {Object.values(state.partners).map((partner) => (
-                <Button
-                  key={partner.id}
-                  size="lg"
-                  variant="outline"
-                  className="h-24 text-xl border-primary/20 hover:border-primary hover:bg-primary/5 group"
-                  onClick={() => handlePartnerSelect(partner.id)}
-                >
-                  <div className="flex items-center justify-between w-full px-4">
-                    <span className="font-semibold">{partner.name}</span>
-                    <ChevronRight className="w-6 h-6 text-primary/40 group-hover:text-primary transition-colors" />
-                  </div>
-                </Button>
-              ))}
+              <Button
+                size="lg"
+                variant="outline"
+                className="h-24 text-xl border-primary/20 hover:border-primary hover:bg-primary/5 group"
+                onClick={() => handlePartnerSelect('afu')}
+              >
+                <div className="flex items-center justify-between w-full px-4">
+                  <span className="font-semibold">Afu</span>
+                  <Badge variant={afuData?.password ? "secondary" : "outline"} className="ml-2">
+                    {afuData?.password ? "Active" : "New"}
+                  </Badge>
+                  <ChevronRight className="w-6 h-6 text-primary/40 group-hover:text-primary transition-colors" />
+                </div>
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                className="h-24 text-xl border-primary/20 hover:border-primary hover:bg-primary/5 group"
+                onClick={() => handlePartnerSelect('ruovaf')}
+              >
+                <div className="flex items-center justify-between w-full px-4">
+                  <span className="font-semibold">Ruovaf</span>
+                  <Badge variant={ruovafData?.password ? "secondary" : "outline"} className="ml-2">
+                    {ruovafData?.password ? "Active" : "New"}
+                  </Badge>
+                  <ChevronRight className="w-6 h-6 text-primary/40 group-hover:text-primary transition-colors" />
+                </div>
+              </Button>
             </div>
           ) : (
             <Card className="border-none shadow-xl bg-white/50 backdrop-blur-sm">
               <CardContent className="p-6 space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="password">
-                    {state.partners[tempId].password ? "Enter Password" : "Set New Password"}
+                    {((tempRole === 'afu' ? afuData : ruovafData)?.password) ? "Enter Password" : "Set New Password"}
                   </Label>
                   <Input 
                     id="password" 
@@ -250,7 +268,7 @@ export default function RuovafApp() {
                     onChange={(e) => setPasswordInput(e.target.value)}
                   />
                 </div>
-                {!state.partners[tempId].password && (
+                {!((tempRole === 'afu' ? afuData : ruovafData)?.password) && (
                   <div className="space-y-2">
                     <Label htmlFor="confirm-password">Confirm Password</Label>
                     <Input 
@@ -263,9 +281,9 @@ export default function RuovafApp() {
                   </div>
                 )}
                 <div className="flex gap-2 pt-2">
-                  <Button variant="ghost" className="flex-1" onClick={() => setTempId(null)}>Cancel</Button>
+                  <Button variant="ghost" className="flex-1" onClick={() => setTempRole(null)}>Cancel</Button>
                   <Button className="flex-1" onClick={handleAuth}>
-                    {state.partners[tempId].password ? "Enter" : "Initialize"}
+                    {((tempRole === 'afu' ? afuData : ruovafData)?.password) ? "Enter" : "Initialize"}
                   </Button>
                 </div>
               </CardContent>
@@ -276,12 +294,10 @@ export default function RuovafApp() {
     );
   }
 
-  const today = getTodayStr();
-  const currentPartner = state.partners[activePartnerId!];
-  const otherPartnerId = activePartnerId === 'partner-1' ? 'partner-2' : 'partner-1';
-  const otherPartner = state.partners[otherPartnerId];
-  const myTodayCount = currentPartner.smileHistory[today] || 0;
-  const otherTodayCount = otherPartner.smileHistory[today] || 0;
+  const currentPartner = activeRole === 'afu' ? afuData : ruovafData;
+  const otherPartner = activeRole === 'afu' ? ruovafData : afuData;
+  const myTodayCount = currentPartner?.currentSmileCount || 0;
+  const otherTodayCount = otherPartner?.currentSmileCount || 0;
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -310,7 +326,7 @@ export default function RuovafApp() {
             </button>
             <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping -z-0" />
           </div>
-          <p className="text-muted-foreground font-medium">Tap to record a smile for {otherPartner.name}</p>
+          <p className="text-muted-foreground font-medium">Tap to record a smile for {otherPartner?.displayName || (activeRole === 'afu' ? 'Ruovaf' : 'Afu')}</p>
         </section>
 
         {/* AI Prompt Section */}
@@ -369,10 +385,10 @@ export default function RuovafApp() {
 
               <Card className="bg-white/50 backdrop-blur-sm border-none shadow-sm">
                 <CardHeader className="p-4 pb-2">
-                  <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{otherPartner.name}</CardTitle>
+                  <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{otherPartner?.displayName || (activeRole === 'afu' ? 'Ruovaf' : 'Afu')}</CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 pt-0">
-                  {otherPartner.isVisible ? (
+                  {otherPartner?.visibilityEnabled ? (
                     <div className="flex items-end gap-2">
                       <span className="text-3xl font-bold text-secondary">{otherTodayCount}</span>
                       <Badge variant="outline" className="text-[10px] py-0 border-secondary/20 text-secondary">Visible</Badge>
@@ -397,20 +413,18 @@ export default function RuovafApp() {
               <CardContent className="p-0">
                 <ScrollArea className="h-64 px-6 pb-6">
                   <div className="space-y-4">
-                    {Object.entries(currentPartner.smileHistory)
-                      .sort(([a], [b]) => b.localeCompare(a))
-                      .map(([date, count]) => (
-                        <div key={date} className="flex items-center justify-between py-2 border-b last:border-none">
-                          <div className="space-y-0.5">
-                            <p className="font-medium">{new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</p>
-                            <p className="text-xs text-muted-foreground">Recorded smiles</p>
-                          </div>
-                          <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none px-3 font-bold">
-                            {count}
-                          </Badge>
+                    {smileHistory?.map((record) => (
+                      <div key={record.recordDate} className="flex items-center justify-between py-2 border-b last:border-none">
+                        <div className="space-y-0.5">
+                          <p className="font-medium">{new Date(record.recordDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                          <p className="text-xs text-muted-foreground">Daily total</p>
                         </div>
-                      ))}
-                    {Object.keys(currentPartner.smileHistory).length === 0 && (
+                        <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none px-3 font-bold">
+                          {record.smileCount}
+                        </Badge>
+                      </div>
+                    ))}
+                    {(!smileHistory || smileHistory.length === 0) && (
                       <div className="text-center py-12 text-muted-foreground italic">
                         No records yet. Start smiling!
                       </div>
@@ -430,11 +444,11 @@ export default function RuovafApp() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label className="text-base">Smile Visibility</Label>
-                    <p className="text-sm text-muted-foreground">Allow {otherPartner.name} to see your daily count</p>
+                    <p className="text-sm text-muted-foreground">Allow {otherPartner?.displayName || 'your partner'} to see your daily count</p>
                   </div>
                   <Switch 
-                    checked={currentPartner.isVisible} 
-                    onCheckedChange={() => toggleVisibility(activePartnerId!)}
+                    checked={!!currentPartner?.visibilityEnabled} 
+                    onCheckedChange={toggleVisibility}
                   />
                 </div>
                 
@@ -444,11 +458,11 @@ export default function RuovafApp() {
                    <Label className="text-base block">User Profile</Label>
                    <div className="flex items-center gap-4 bg-muted/20 p-4 rounded-xl">
                       <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
-                        {currentPartner.name.charAt(0)}
+                        {currentPartner?.displayName?.charAt(0) || activeRole?.charAt(0).toUpperCase()}
                       </div>
                       <div className="flex-1">
-                        <p className="font-bold">{currentPartner.name}</p>
-                        <p className="text-xs text-muted-foreground">Connected & Authenticated</p>
+                        <p className="font-bold">{currentPartner?.displayName}</p>
+                        <p className="text-xs text-muted-foreground">Cloud Sync Active</p>
                       </div>
                    </div>
                 </div>

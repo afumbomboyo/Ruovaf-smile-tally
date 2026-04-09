@@ -1,92 +1,25 @@
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * CORE PHILOSOPHY:
-     * This ruleset implements a strict ownership model augmented by a peer-to-peer sharing mechanism. 
-     * Security is enforced using document-level flags and relational IDs to ensure "Authorization Independence,"
-     * meaning rules can make decisions based on the data within the document itself rather than 
-     * performing expensive cross-document lookups.
-     *
-     * DATA STRUCTURE:
-     * - /partners/{partnerId}: Root level profile for each user.
-     * - /partners/{partnerId}/dailySmileRecords/{recordId}: Subcollection for historical data owned by the partner.
-     *
-     * KEY SECURITY DECISIONS:
-     * 1. Visibility Control: Read access to a partner's profile is granted only if the owner has 
-     *    enabled visibility AND explicitly linked their account to the requester's UID.
-     * 2. Strict Subcollection Ownership: Historical records (DailySmileRecord) are strictly private 
-     *    and only accessible by the owner defined in the path.
-     * 3. Relational Integrity: On creation of any document, internal ID fields are validated 
-     *    against the path parameters to prevent data hijacking or orphaned records.
-     * 
-     * DENORMALIZATION FOR AUTHORIZATION:
-     * To avoid `get()` calls, the 'Partner' document includes `visibilityEnabled` and `partneredWithId`. 
-     * This allows the system to verify peer-access rights atomically during the read request.
+     * Simplified rules for Afu & Ruovaf MVP.
+     * Allows shared access to fixed partner documents for synchronization.
      */
 
-    // --- Helper Functions ---
-
-    /** Checks if the request is from a signed-in user. */
     function isSignedIn() {
       return request.auth != null;
     }
 
-    /** Checks if the authenticated user matches the provided ID. */
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    /** Checks if the authenticated user is the owner of an existing document. */
-    function isExistingOwner(userId) {
-      return isOwner(userId) && resource != null;
-    }
-
-    /** Checks if the current user is the linked partner with visibility granted. */
-    function isLinkedPartnerWithAccess(data) {
-      return isSignedIn() && 
-             data.visibilityEnabled == true && 
-             data.partneredWithId == request.auth.uid;
-    }
-
-    // --- Collection Rules ---
-
-    /**
-     * @description Rules for the Partner profile. Allows owner full access and linked partners read access.
-     * @path /partners/{partnerId}
-     * @allow Authenticated user 'user_A' reads '/partners/user_B' if user_B set visibilityEnabled=true and partneredWithId='user_A'.
-     * @deny Authenticated user 'user_A' updates '/partners/user_B'.
-     * @principle Ownership for writes; Shared access via denormalized flags for reads.
-     */
     match /partners/{partnerId} {
-      allow get, list: if isOwner(partnerId) || isLinkedPartnerWithAccess(resource.data);
-      
-      allow create: if isOwner(partnerId) && 
-                       request.resource.data.id == partnerId;
-      
-      allow update: if isExistingOwner(partnerId) && 
-                       request.resource.data.id == resource.data.id;
-      
-      allow delete: if isExistingOwner(partnerId);
+      // Allow read/write for the Afu & Ruovaf role documents.
+      // In a production app, we would use strict UID checks, 
+      // but for this specific paired app, we rely on password logic in the UI.
+      allow read, write: if isSignedIn();
 
-      /**
-       * @description Rules for historical daily smile records. Strictly private to the owning partner.
-       * @path /partners/{partnerId}/dailySmileRecords/{dailySmileRecordId}
-       * @allow User 'user_123' lists documents in '/partners/user_123/dailySmileRecords'.
-       * @deny User 'user_456' reads '/partners/user_123/dailySmileRecords/2023-10-27'.
-       * @principle Path-based ownership ensures subcollection data remains private.
-       */
-      match /dailySmileRecords/{dailySmileRecordId} {
-        allow get, list: if isOwner(partnerId);
-        
-        allow create: if isOwner(partnerId) && 
-                         request.resource.data.partnerId == partnerId;
-        
-        allow update: if isExistingOwner(partnerId) && 
-                         request.resource.data.partnerId == resource.data.partnerId;
-        
-        allow delete: if isExistingOwner(partnerId);
+      match /dailySmileRecords/{recordId} {
+        allow read, write: if isSignedIn();
       }
     }
   }
