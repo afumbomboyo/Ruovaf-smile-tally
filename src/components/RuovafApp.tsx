@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useState, useEffect } from 'react';
@@ -237,7 +236,7 @@ export default function RuovafApp() {
               disabled={!coupleName}
               onClick={() => setIsCoupleSet(true)}
             >
-              Start Shared Journey
+              Enter Shared Journey
             </Button>
           </div>
         </div>
