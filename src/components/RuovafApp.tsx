@@ -220,8 +220,8 @@ export default function RuovafApp() {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-8 fade-in text-center">
-          <div className="mx-auto bg-primary/10 w-64 h-64 rounded-full flex items-center justify-center mb-8 shadow-inner">
-            <Heart className="w-32 h-32 text-primary animate-pulse fill-primary/20" />
+          <div className="mx-auto bg-primary/10 w-40 h-40 rounded-full flex items-center justify-center mb-8 shadow-inner">
+            <Heart className="w-20 h-20 text-primary animate-pulse fill-primary/20" />
           </div>
           <h1 className="text-4xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
           <p className="text-muted-foreground">Welcome! Enter your unique Couple Name to begin.</p>
@@ -258,10 +258,10 @@ export default function RuovafApp() {
           </header>
           
           <div className="text-center space-y-2">
-            <div className="mx-auto bg-primary/10 w-48 h-48 rounded-full flex items-center justify-center mb-8 shadow-inner">
-              <Heart className="w-24 h-24 text-primary animate-pulse fill-primary/20" />
+            <div className="mx-auto bg-primary/10 w-32 h-32 rounded-full flex items-center justify-center mb-8 shadow-inner">
+              <Heart className="w-16 h-16 text-primary animate-pulse fill-primary/20" />
             </div>
-            <h1 className="text-4xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
             <p className="text-muted-foreground">
               {tempRole ? `Secure access for ${tempRole === 'afu' ? 'Afu' : 'Ruovaf'}` : "Welcome! Who is checking in?"}
             </p>
