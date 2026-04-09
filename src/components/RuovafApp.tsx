@@ -34,7 +34,8 @@ import {
   setDocumentNonBlocking,
   updateDocumentNonBlocking,
   initiateAnonymousSignIn,
-  useUser
+  useUser,
+  useAuth
 } from '@/firebase';
 import { doc, collection, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 
@@ -43,7 +44,8 @@ type PartnerRole = 'afu' | 'ruovaf';
 export default function RuovafApp() {
   const { toast } = useToast();
   const db = useFirestore();
-  const { user, isUserLoading: isAuthLoading } = useUser();
+  const auth = useAuth();
+  const { user, isUserLoading } = useUser();
   const [activeRole, setActiveRole] = useState<PartnerRole | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [aiPrompt, setAiPrompt] = useState<string | null>(null);
@@ -58,13 +60,12 @@ export default function RuovafApp() {
   const [passwordInput, setPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
 
-  // Firebase Auth - Anonymous sign-in for Firestore access
+  // Firebase Auth - Trigger anonymous sign-in if no user session found
   useEffect(() => {
-    const { auth } = require('@/firebase');
-    if (auth && !user && !isAuthLoading) {
+    if (!isUserLoading && !user) {
       initiateAnonymousSignIn(auth);
     }
-  }, [user, isAuthLoading]);
+  }, [user, isUserLoading, auth]);
 
   // Firestore Data References
   const afuRef = useMemoFirebase(() => {
@@ -120,20 +121,22 @@ export default function RuovafApp() {
       const result = await generateLovingPrompt({});
       setAiPrompt(result.prompt);
     } catch (error) {
-      // Error handled by AI flow or toast
+      // Handled globally
     } finally {
       setIsLoadingPrompt(false);
     }
   };
 
   const toggleVisibility = () => {
-    if (!activeRole || !afuRef || !ruovafRef) return;
+    if (!activeRole) return;
     const currentRef = activeRole === 'afu' ? afuRef : ruovafRef;
     const currentData = activeRole === 'afu' ? afuData : ruovafData;
     
-    updateDocumentNonBlocking(currentRef, {
-      visibilityEnabled: !currentData?.visibilityEnabled
-    });
+    if (currentRef) {
+      updateDocumentNonBlocking(currentRef, {
+        visibilityEnabled: !currentData?.visibilityEnabled
+      });
+    }
   };
 
   const handlePartnerSelect = (role: PartnerRole) => {
@@ -143,22 +146,24 @@ export default function RuovafApp() {
   };
 
   const handleAuth = () => {
-    if (!tempRole || !afuRef || !ruovafRef || !user) {
-      toast({ variant: "destructive", title: "Error", description: "System is initializing. Please wait a moment." });
+    if (!tempRole || !user) {
+      toast({ variant: "destructive", title: "Wait", description: "Connecting to heart... please try again in a moment." });
       return;
     }
     
     const roleData = tempRole === 'afu' ? afuData : ruovafData;
     const roleRef = tempRole === 'afu' ? afuRef : ruovafRef;
 
+    if (!roleRef) return;
+
     // First time setup
     if (!roleData || !roleData.password) {
       if (passwordInput.length < 4) {
-        toast({ variant: "destructive", title: "Error", description: "Password must be at least 4 characters." });
+        toast({ variant: "destructive", title: "Weak Password", description: "Please use at least 4 characters." });
         return;
       }
       if (passwordInput !== confirmPasswordInput) {
-        toast({ variant: "destructive", title: "Error", description: "Passwords do not match." });
+        toast({ variant: "destructive", title: "Mismatch", description: "Passwords do not match." });
         return;
       }
 
@@ -176,7 +181,7 @@ export default function RuovafApp() {
       setActiveRole(tempRole);
       setIsAuthenticated(true);
       setTempRole(null);
-      toast({ title: "Welcome!", description: `${tempRole === 'afu' ? 'Afu' : 'Ruovaf'}'s account has been initialized.` });
+      toast({ title: "Heart Connected", description: `Welcome, ${tempRole === 'afu' ? 'Afu' : 'Ruovaf'}!` });
     } else {
       // Existing user login
       if (passwordInput === roleData.password) {
@@ -191,20 +196,22 @@ export default function RuovafApp() {
   };
 
   const handlePasswordChange = () => {
-    if (!activeRole || !afuRef || !ruovafRef) return;
+    if (!activeRole) return;
     const roleRef = activeRole === 'afu' ? afuRef : ruovafRef;
 
+    if (!roleRef) return;
+
     if (passwordInput.length < 4) {
-      toast({ variant: "destructive", title: "Error", description: "Password must be at least 4 characters." });
+      toast({ variant: "destructive", title: "Weak Password", description: "Please use at least 4 characters." });
       return;
     }
     if (passwordInput !== confirmPasswordInput) {
-      toast({ variant: "destructive", title: "Error", description: "Passwords do not match." });
+      toast({ variant: "destructive", title: "Mismatch", description: "Passwords do not match." });
       return;
     }
 
     updateDocumentNonBlocking(roleRef, { password: passwordInput });
-    toast({ title: "Success", description: "Password updated successfully." });
+    toast({ title: "Updated", description: "Your password has been changed." });
     setPasswordInput('');
     setConfirmPasswordInput('');
   };
@@ -217,8 +224,8 @@ export default function RuovafApp() {
     setIsCoupleSet(false);
   };
 
-  // Auth Loading Screen
-  if (isAuthLoading || !user) return (
+  // Initial Auth Check Loading
+  if (isUserLoading) return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-4">
         <Loader2 className="h-10 w-10 animate-spin text-primary" />
@@ -232,8 +239,8 @@ export default function RuovafApp() {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
         <div className="max-w-md w-full space-y-10 fade-in text-center">
-          <div className="mx-auto bg-primary/5 w-32 h-32 rounded-full flex items-center justify-center shadow-inner">
-            <Heart className="w-16 h-16 text-primary animate-pulse fill-primary/10" />
+          <div className="mx-auto bg-primary/5 w-40 h-40 rounded-full flex items-center justify-center shadow-inner">
+            <Heart className="w-20 h-20 text-primary animate-pulse fill-primary/10" />
           </div>
           <div className="space-y-2">
             <h1 className="text-4xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
@@ -260,7 +267,7 @@ export default function RuovafApp() {
     );
   }
 
-  // Authentication or Selection Screen
+  // Role Selection & Login Screen
   if (!isAuthenticated) {
     const roleLoading = tempRole === 'afu' ? isAfuLoading : isRuovafLoading;
     const targetData = tempRole === 'afu' ? afuData : ruovafData;
@@ -276,8 +283,8 @@ export default function RuovafApp() {
           </header>
           
           <div className="text-center space-y-4">
-            <div className="mx-auto bg-primary/5 w-24 h-24 rounded-full flex items-center justify-center shadow-inner">
-              <Heart className="w-12 h-12 text-primary fill-primary/10" />
+            <div className="mx-auto bg-primary/5 w-32 h-32 rounded-full flex items-center justify-center shadow-inner">
+              <Heart className="w-16 h-16 text-primary fill-primary/10" />
             </div>
             <div className="space-y-1">
               <h1 className="text-3xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
@@ -331,7 +338,7 @@ export default function RuovafApp() {
                   <>
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label htmlFor="password" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        <Label htmlFor="password" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
                           {targetData?.password ? "Enter Password" : "Set New Password"}
                         </Label>
                         <Input 
@@ -346,7 +353,7 @@ export default function RuovafApp() {
                       </div>
                       {!targetData?.password && (
                         <div className="space-y-2 fade-in">
-                          <Label htmlFor="confirm-password" className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Confirm Password</Label>
+                          <Label htmlFor="confirm-password" className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Confirm Password</Label>
                           <Input 
                             id="confirm-password" 
                             type="password" 
@@ -568,7 +575,7 @@ export default function RuovafApp() {
               <CardContent className="space-y-6">
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="new-password" title="At least 4 characters">New Password</Label>
+                    <Label htmlFor="new-password">New Password</Label>
                     <Input 
                       id="new-password" 
                       type="password" 
