@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState, useEffect } from 'react';
@@ -64,28 +65,28 @@ export default function RuovafApp() {
     }
   }, [user, isAuthLoading]);
 
-  // Firestore Data References - These should only depend on coupleName to be available for auth
+  // Firestore Data References - Crucially check for 'user' to avoid permission errors before auth
   const afuRef = useMemoFirebase(() => {
-    if (!coupleName) return null;
+    if (!coupleName || !user) return null;
     return doc(db, 'partners', `${coupleName}_afu`);
-  }, [db, coupleName]);
+  }, [db, coupleName, user]);
   const { data: afuData } = useDoc(afuRef);
 
   const ruovafRef = useMemoFirebase(() => {
-    if (!coupleName) return null;
+    if (!coupleName || !user) return null;
     return doc(db, 'partners', `${coupleName}_ruovaf`);
-  }, [db, coupleName]);
+  }, [db, coupleName, user]);
   const { data: ruovafData } = useDoc(ruovafRef);
 
   // History for active user
   const historyQuery = useMemoFirebase(() => {
-    if (!activeRole || !coupleName) return null;
+    if (!activeRole || !coupleName || !user) return null;
     return query(
       collection(db, 'partners', `${coupleName}_${activeRole}`, 'dailySmileRecords'),
       orderBy('recordDate', 'desc'),
       limit(30)
     );
-  }, [db, activeRole, coupleName]);
+  }, [db, activeRole, coupleName, user]);
   const { data: smileHistory } = useCollection(historyQuery);
 
   const getTodayStr = () => new Date().toISOString().split('T')[0];
@@ -109,8 +110,8 @@ export default function RuovafApp() {
     const historyRef = doc(db, 'partners', `${coupleName}_${activeRole}`, 'dailySmileRecords', today);
     setDocumentNonBlocking(historyRef, {
       recordDate: today,
+      partnerId: activeRole,
       smileCount: newCount,
-      updatedAt: serverTimestamp()
     }, { merge: true });
 
     setIsLoadingPrompt(true);
@@ -219,8 +220,8 @@ export default function RuovafApp() {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-8 fade-in text-center">
-          <div className="mx-auto bg-primary/10 w-40 h-40 rounded-full flex items-center justify-center mb-8 shadow-inner">
-            <Heart className="w-20 h-20 text-primary animate-pulse fill-primary/20" />
+          <div className="mx-auto bg-primary/10 w-32 h-32 rounded-full flex items-center justify-center mb-8 shadow-inner">
+            <Heart className="w-16 h-16 text-primary animate-pulse fill-primary/20" />
           </div>
           <h1 className="text-4xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
           <p className="text-muted-foreground">Welcome! Enter your unique Couple Name to begin.</p>
@@ -257,8 +258,8 @@ export default function RuovafApp() {
           </header>
           
           <div className="text-center space-y-2">
-            <div className="mx-auto bg-primary/10 w-32 h-32 rounded-full flex items-center justify-center mb-8 shadow-inner">
-              <Heart className="w-16 h-16 text-primary animate-pulse fill-primary/20" />
+            <div className="mx-auto bg-primary/10 w-24 h-24 rounded-full flex items-center justify-center mb-6 shadow-inner">
+              <Heart className="w-12 h-12 text-primary animate-pulse fill-primary/20" />
             </div>
             <h1 className="text-3xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
             <p className="text-muted-foreground">
