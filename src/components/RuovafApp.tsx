@@ -9,7 +9,6 @@ import {
   Users, 
   Settings, 
   History, 
-  Eye, 
   EyeOff, 
   ArrowLeft,
   Sparkles,
@@ -43,11 +42,15 @@ type PartnerRole = 'afu' | 'ruovaf';
 export default function RuovafApp() {
   const { toast } = useToast();
   const db = useFirestore();
-  const { user } = useUser();
+  const { user, isUserLoading: isAuthLoading } = useUser();
   const [activeRole, setActiveRole] = useState<PartnerRole | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [aiPrompt, setAiPrompt] = useState<string | null>(null);
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
+
+  // Grouping state to support multiple couples
+  const [coupleName, setCoupleName] = useState('');
+  const [isCoupleSet, setIsCoupleSet] = useState(false);
 
   // Auth/Setup form state
   const [tempRole, setTempRole] = useState<PartnerRole | null>(null);
@@ -57,49 +60,55 @@ export default function RuovafApp() {
   // Firebase Auth - Anonymous sign-in for Firestore access
   useEffect(() => {
     const { auth } = require('@/firebase');
-    if (auth && !user) {
+    if (auth && !user && !isAuthLoading) {
       initiateAnonymousSignIn(auth);
     }
-  }, [user]);
+  }, [user, isAuthLoading]);
 
   // Firestore Data - Afu
-  const afuRef = useMemoFirebase(() => doc(db, 'partners', 'afu'), [db]);
+  const afuRef = useMemoFirebase(() => {
+    if (!user || !coupleName) return null;
+    return doc(db, 'partners', `${coupleName}_afu`);
+  }, [db, user, coupleName]);
   const { data: afuData, isLoading: isLoadingAfu } = useDoc(afuRef);
 
   // Firestore Data - Ruovaf
-  const ruovafRef = useMemoFirebase(() => doc(db, 'partners', 'ruovaf'), [db]);
+  const ruovafRef = useMemoFirebase(() => {
+    if (!user || !coupleName) return null;
+    return doc(db, 'partners', `${coupleName}_ruovaf`);
+  }, [db, user, coupleName]);
   const { data: ruovafData, isLoading: isLoadingRuovaf } = useDoc(ruovafRef);
 
   // History for active user
   const historyQuery = useMemoFirebase(() => {
-    if (!activeRole) return null;
+    if (!activeRole || !coupleName) return null;
     return query(
-      collection(db, 'partners', activeRole, 'dailySmileRecords'),
+      collection(db, 'partners', `${coupleName}_${activeRole}`, 'dailySmileRecords'),
       orderBy('recordDate', 'desc'),
       limit(30)
     );
-  }, [db, activeRole]);
+  }, [db, activeRole, coupleName]);
   const { data: smileHistory } = useCollection(historyQuery);
 
   const getTodayStr = () => new Date().toISOString().split('T')[0];
 
   const handleIncrement = async () => {
-    if (!activeRole || !isAuthenticated) return;
+    if (!activeRole || !isAuthenticated || !coupleName) return;
 
     const today = getTodayStr();
     const currentRef = activeRole === 'afu' ? afuRef : ruovafRef;
     const currentData = activeRole === 'afu' ? afuData : ruovafData;
 
+    if (!currentRef) return;
+
     const newCount = (currentData?.currentSmileCount || 0) + 1;
     
-    // Update main count
     updateDocumentNonBlocking(currentRef, {
       currentSmileCount: newCount,
       lastActive: serverTimestamp()
     });
 
-    // Update historical record
-    const historyRef = doc(db, 'partners', activeRole, 'dailySmileRecords', today);
+    const historyRef = doc(db, 'partners', `${coupleName}_${activeRole}`, 'dailySmileRecords', today);
     setDocumentNonBlocking(historyRef, {
       recordDate: today,
       smileCount: newCount,
@@ -111,14 +120,14 @@ export default function RuovafApp() {
       const result = await generateLovingPrompt({});
       setAiPrompt(result.prompt);
     } catch (error) {
-      console.error("AI Error:", error);
+      // Error handled by AI flow
     } finally {
       setIsLoadingPrompt(false);
     }
   };
 
   const toggleVisibility = () => {
-    if (!activeRole) return;
+    if (!activeRole || !afuRef || !ruovafRef) return;
     const currentRef = activeRole === 'afu' ? afuRef : ruovafRef;
     const currentData = activeRole === 'afu' ? afuData : ruovafData;
     
@@ -134,12 +143,11 @@ export default function RuovafApp() {
   };
 
   const handleAuth = () => {
-    if (!tempRole) return;
+    if (!tempRole || !afuRef || !ruovafRef) return;
     const roleData = tempRole === 'afu' ? afuData : ruovafData;
     const roleRef = tempRole === 'afu' ? afuRef : ruovafRef;
 
     if (!roleData || !roleData.password) {
-      // First time setup
       if (passwordInput.length < 4) {
         toast({ variant: "destructive", title: "Error", description: "Password must be at least 4 characters." });
         return;
@@ -163,7 +171,6 @@ export default function RuovafApp() {
       setIsAuthenticated(true);
       setTempRole(null);
     } else {
-      // Login
       if (passwordInput === roleData.password) {
         setActiveRole(tempRole);
         setIsAuthenticated(true);
@@ -176,7 +183,7 @@ export default function RuovafApp() {
   };
 
   const handlePasswordChange = () => {
-    if (!activeRole) return;
+    if (!activeRole || !afuRef || !ruovafRef) return;
     const roleRef = activeRole === 'afu' ? afuRef : ruovafRef;
 
     if (passwordInput.length < 4) {
@@ -199,19 +206,57 @@ export default function RuovafApp() {
     setIsAuthenticated(false);
     setAiPrompt(null);
     setTempRole(null);
+    setIsCoupleSet(false);
   };
 
-  if (isLoadingAfu || isLoadingRuovaf) return (
+  if (isAuthLoading) return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
     </div>
   );
+
+  // Initial Couple Selection
+  if (!isCoupleSet) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-md w-full space-y-8 fade-in text-center">
+          <div className="mx-auto bg-primary/10 w-64 h-64 rounded-full flex items-center justify-center mb-8 shadow-inner">
+            <Heart className="w-32 h-32 text-primary animate-pulse fill-primary/20" />
+          </div>
+          <h1 className="text-4xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
+          <p className="text-muted-foreground">Welcome! Enter your unique Couple Name to begin.</p>
+          <div className="space-y-4">
+            <Input 
+              placeholder="e.g. OurSweetHome" 
+              value={coupleName}
+              onChange={(e) => setCoupleName(e.target.value.toLowerCase().trim())}
+              className="text-center h-12 text-lg"
+            />
+            <Button 
+              className="w-full h-12 text-lg" 
+              disabled={!coupleName}
+              onClick={() => setIsCoupleSet(true)}
+            >
+              Start Shared Journey
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Authentication or Selection Screen
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-8 fade-in">
+          <header className="flex items-center gap-2 mb-4">
+            <Button variant="ghost" size="icon" onClick={() => setIsCoupleSet(false)}>
+               <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <span className="text-sm font-medium text-muted-foreground uppercase tracking-wider">{coupleName}</span>
+          </header>
+          
           <div className="text-center space-y-2">
             <div className="mx-auto bg-primary/10 w-48 h-48 rounded-full flex items-center justify-center mb-8 shadow-inner">
               <Heart className="w-24 h-24 text-primary animate-pulse fill-primary/20" />
@@ -309,12 +354,11 @@ export default function RuovafApp() {
           <Smile className="w-5 h-5" />
           Afu & Ruovaf
         </span>
-        <div className="w-10" />
+        <div className="text-xs font-bold text-muted-foreground uppercase opacity-40">{coupleName}</div>
       </header>
 
       <main className="max-w-md mx-auto p-4 space-y-6">
-        {/* Main Action Counter */}
-        <section className="text-center space-y-6 pt-4 relative z-0">
+        <section className="text-center space-y-6 pt-4 relative">
           <div className="relative inline-block">
             <button
               onClick={handleIncrement}
@@ -324,14 +368,13 @@ export default function RuovafApp() {
               <span className="text-4xl font-bold">{myTodayCount}</span>
               <span className="text-sm font-medium opacity-80 uppercase tracking-widest mt-1">Today</span>
             </button>
-            <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping -z-0" />
+            <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping z-0" />
           </div>
           <p className="text-muted-foreground font-medium">Tap to record a smile for {otherPartner?.displayName || (activeRole === 'afu' ? 'Ruovaf' : 'Afu')}</p>
         </section>
 
-        {/* AI Prompt Section */}
-        { (aiPrompt || isLoadingPrompt) && (
-          <div className="fade-in relative z-10">
+        {(aiPrompt || isLoadingPrompt) && (
+          <div className="fade-in">
             <Card className="border-none shadow-lg bg-secondary/10 overflow-hidden">
               <div className="bg-secondary h-1" />
               <CardContent className="p-6">
@@ -353,17 +396,17 @@ export default function RuovafApp() {
           </div>
         )}
 
-        <Tabs defaultValue="dashboard" className="w-full relative z-10">
+        <Tabs defaultValue="dashboard" className="w-full">
           <TabsList className="grid w-full grid-cols-3 bg-muted/50 p-1 h-12 rounded-xl">
-            <TabsTrigger value="dashboard" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <TabsTrigger value="dashboard" className="rounded-lg">
               <Users className="w-4 h-4 mr-2" />
               Home
             </TabsTrigger>
-            <TabsTrigger value="history" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <TabsTrigger value="history" className="rounded-lg">
               <History className="w-4 h-4 mr-2" />
               Logs
             </TabsTrigger>
-            <TabsTrigger value="settings" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <TabsTrigger value="settings" className="rounded-lg">
               <Settings className="w-4 h-4 mr-2" />
               Set
             </TabsTrigger>
@@ -419,7 +462,7 @@ export default function RuovafApp() {
                           <p className="font-medium">{new Date(record.recordDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</p>
                           <p className="text-xs text-muted-foreground">Daily total</p>
                         </div>
-                        <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none px-3 font-bold">
+                        <Badge className="bg-primary/10 text-primary font-bold">
                           {record.smileCount}
                         </Badge>
                       </div>
@@ -462,7 +505,7 @@ export default function RuovafApp() {
                       </div>
                       <div className="flex-1">
                         <p className="font-bold">{currentPartner?.displayName}</p>
-                        <p className="text-xs text-muted-foreground">Cloud Sync Active</p>
+                        <p className="text-xs text-muted-foreground">Pair: {coupleName}</p>
                       </div>
                    </div>
                 </div>
