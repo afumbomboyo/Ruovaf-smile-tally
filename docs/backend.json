@@ -1,3 +1,4 @@
+
 {
   "entities": {
     "Partner": {
@@ -18,13 +19,21 @@
           "type": "number",
           "description": "The current count of smiles recorded by this partner for the current day. This count resets daily."
         },
+        "lastUpdateDate": {
+          "type": "string",
+          "description": "The date of the last smile update in YYYY-MM-DD format (Cameroon time). Used for daily reset logic."
+        },
+        "password": {
+          "type": "string",
+          "description": "Hashed or plain password for partner access."
+        },
         "visibilityEnabled": {
           "type": "boolean",
           "description": "A flag indicating whether this partner's smile count is visible to their linked partner."
         },
         "partneredWithId": {
           "type": "string",
-          "description": "Reference to the unique identifier of the other partner in this relationship. (Relationship: Partner 1:1 Partner)"
+          "description": "Reference to the unique identifier of the other partner in this relationship."
         },
         "createdAt": {
           "type": "string",
@@ -58,7 +67,7 @@
         },
         "partnerId": {
           "type": "string",
-          "description": "Reference to the Partner who recorded these smiles. (Relationship: Partner 1:N DailySmileRecord)"
+          "description": "Reference to the Partner who recorded these smiles."
         },
         "recordDate": {
           "type": "string",
@@ -93,11 +102,11 @@
           "schema": {
             "$ref": "#/backend/entities/Partner"
           },
-          "description": "Stores individual partner profiles and their current smile counts. The `{partnerId}` in the path corresponds to `request.auth.uid`. Documents include `visibilityEnabled` and `partneredWithId` fields, which are crucial for enabling Authorization Independence in rules that grant read access to a linked partner's data without needing `get()` operations. This structure allows a partner to own and manage their data, while also allowing their linked partner to securely view specific data based on explicit visibility settings.",
+          "description": "Stores individual partner profiles and their current smile counts.",
           "params": [
             {
               "name": "partnerId",
-              "description": "The unique identifier of the partner, which directly maps to `request.auth.uid`."
+              "description": "The unique identifier of the partner."
             }
           ]
         }
@@ -109,20 +118,19 @@
           "schema": {
             "$ref": "#/backend/entities/DailySmileRecord"
           },
-          "description": "Stores historical daily smile counts for each partner. These documents are strictly owned by the `{partnerId}` from the parent path, ensuring Authorization Independence as rules for this subcollection only need to compare `{partnerId}` with `request.auth.uid`. The `{dailySmileRecordId}` can be formatted as `YYYY-MM-DD` for easy lookup and to guarantee a unique record per day per partner. This structure fully supports QAPs for private historical data.",
+          "description": "Stores historical daily smile counts for each partner.",
           "params": [
             {
               "name": "partnerId",
-              "description": "The unique identifier of the owning partner, derived from the parent collection path."
+              "description": "The unique identifier of the owning partner."
             },
             {
               "name": "dailySmileRecordId",
-              "description": "The unique identifier for the daily smile record, ideally a date string in `YYYY-MM-DD` format."
+              "description": "Date string in YYYY-MM-DD format."
             }
           ]
         }
       }
-    ],
-    "reasoning": "The recommended Firestore structure for Ruovaf Smile Tally prioritizes secure, scalable, and debuggable authorization by strictly adhering to the core design principles and mandates. \n\n**Authorization Independence (CRITICAL):**\n\n1.  **For the `Partner` entity:** Each partner's main profile and current state (e.g., `currentSmileCount`, `visibilityEnabled`, `partneredWithId`) will reside in a top-level collection at `/partners/{partnerId}`. When Partner A needs to read Partner B's data (for the shared display), the authorization rule on Partner B's document will check `resource.data.visibilityEnabled` and `resource.data.partneredWithId` directly. This entirely avoids `get()` calls to other documents to determine access, ensuring atomic operations and simplifying rule logic. The necessary authorization context (`visibilityEnabled`, `partneredWithId`) is present within the document being accessed, fulfilling the spirit of denormalization for peer-to-peer access without violating Authorization Independence.\n2.  **For `DailySmileRecord` entities:** These are stored as subcollections under the owning partner: `/partners/{partnerId}/dailySmileRecords/{dailySmileRecordId}`. Ownership is derived directly from the `{partnerId}` wildcard in the path, which must match `request.auth.uid`. This structure inherently eliminates any need for `get()` calls to a parent document for authorization, as all required context is available in the request path.\n\n**QAPs (Queries are not Filters):**\n\n1.  **`partners` collection:** \n    *   For a partner to read their own document, a direct `get()` or `list` filtered by `partnerId == request.auth.uid` is secure and efficient.\n    *   For the 'Shared Smile Display' feature, a partner will query for their linked partner's document using `where('partneredWithId', '==', request.auth.uid)`. The security rule for this collection will then enforce `allow read: if request.auth.uid == partnerId || (resource.data.visibilityEnabled && request.auth.uid == resource.data.partneredWithId)`. This ensures that `list` operations targeting linked partners return only documents where the current user is the partner *or* the linked partner and visibility is enabled. This pattern guarantees that queries are never filtered by security rules post-retrieval, as the rule's conditions are applied efficiently at the database level against indexed fields (like `partneredWithId`).\n2.  **`dailySmileRecords` subcollection:** The hierarchical path `/partners/{partnerId}/dailySmileRecords/{dailySmileRecordId}` makes QAPs extremely straightforward. Any `list` query for `dailySmileRecords` under a specific `{partnerId}` will automatically be secure by requiring `partnerId == request.auth.uid`. This ensures that a partner can only list their own historical records, fully satisfying the QAP principle.\n\n**Other Key Design Mandates:**\n\n*   **Structural Segregation:** All documents within the `/partners` collection share the same access posture (owner can write, owner or explicitly visible linked partner can read). Similarly, all documents in `/partners/{partnerId}/dailySmileRecords` are strictly owned by `{partnerId}`. This maintains homogeneous security requirements per collection.\n*   **Access Modeling:** Path-based ownership (`/partners/{partnerId}`) is used for primary partner data, and a hierarchical path (`/partners/{partnerId}/dailySmileRecords/{dailySmileRecordId}`) is used for user-owned nested data. The peer-to-peer relationship is handled by explicit `partneredWithId` and `visibilityEnabled` fields in the `Partner` document, which acts as a form of denormalized authorization context for linked entities.\n*   **Data Clarity & Predictability:** `visibilityEnabled` clearly states the data's sharing status. Wildcards are descriptive (`{partnerId}`, `{dailySmileRecordId}`). Document IDs for `DailySmileRecord` can be the date string (`YYYY-MM-DD`) for predictable access and uniqueness per day.\n\nThis structure provides clear ownership, explicit sharing mechanisms, and simplifies security rules, making the system robust and easy to debug while meeting all application requirements."
+    ]
   }
 }

@@ -51,16 +51,30 @@ export default function RuovafApp() {
   const [aiPrompt, setAiPrompt] = useState<string | null>(null);
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false);
 
-  // Grouping state to support multiple couples
   const [coupleName, setCoupleName] = useState('');
   const [isCoupleSet, setIsCoupleSet] = useState(false);
 
-  // Auth/Setup form state
   const [tempRole, setTempRole] = useState<PartnerRole | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
 
-  // Firebase Auth - Trigger anonymous sign-in if no user session found
+  // Load persistence on mount
+  useEffect(() => {
+    const storedCouple = localStorage.getItem('ruovaf_couple');
+    const storedRole = localStorage.getItem('ruovaf_role') as PartnerRole;
+    const storedAuth = localStorage.getItem('ruovaf_auth') === 'true';
+
+    if (storedCouple) {
+      setCoupleName(storedCouple);
+      setIsCoupleSet(true);
+    }
+    if (storedRole && storedAuth) {
+      setActiveRole(storedRole);
+      setIsAuthenticated(true);
+    }
+  }, []);
+
+  // Firebase Auth - Trigger anonymous sign-in
   useEffect(() => {
     if (!isUserLoading && !user) {
       initiateAnonymousSignIn(auth);
@@ -91,7 +105,15 @@ export default function RuovafApp() {
   }, [db, activeRole, coupleName, user]);
   const { data: smileHistory } = useCollection(historyQuery);
 
-  const getTodayStr = () => new Date().toISOString().split('T')[0];
+  // Cameroon Timezone Reset Logic (WAT, UTC+1)
+  const getTodayStr = () => {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Douala',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+  };
 
   const handleIncrement = async () => {
     if (!activeRole || !isAuthenticated || !coupleName || !user) return;
@@ -102,13 +124,21 @@ export default function RuovafApp() {
 
     if (!currentRef) return;
 
-    const newCount = (currentData?.currentSmileCount || 0) + 1;
+    // Check if the date has changed since the last update
+    const lastDate = currentData?.lastUpdateDate;
+    let newCount = 1;
+    
+    if (lastDate === today) {
+      newCount = (currentData?.currentSmileCount || 0) + 1;
+    }
     
     updateDocumentNonBlocking(currentRef, {
       currentSmileCount: newCount,
+      lastUpdateDate: today,
       lastLoginAt: serverTimestamp()
     });
 
+    // Also update history record for the day
     const historyRef = doc(db, 'partners', `${coupleName}_${activeRole}`, 'dailySmileRecords', today);
     setDocumentNonBlocking(historyRef, {
       recordDate: today,
@@ -116,12 +146,16 @@ export default function RuovafApp() {
       smileCount: newCount,
     }, { merge: true });
 
+    // AI Loving Thought Generation
     setIsLoadingPrompt(true);
+    setAiPrompt(null); // Clear previous to show loading state
     try {
       const result = await generateLovingPrompt({});
-      setAiPrompt(result.prompt);
+      if (result && result.prompt) {
+        setAiPrompt(result.prompt);
+      }
     } catch (error) {
-      // Handled globally
+      console.error("AI Generation failed:", error);
     } finally {
       setIsLoadingPrompt(false);
     }
@@ -172,6 +206,7 @@ export default function RuovafApp() {
         displayName: tempRole === 'afu' ? 'Afu' : 'Ruovaf',
         password: passwordInput,
         currentSmileCount: 0,
+        lastUpdateDate: getTodayStr(),
         visibilityEnabled: true,
         createdAt: serverTimestamp(),
         lastLoginAt: serverTimestamp(),
@@ -181,6 +216,12 @@ export default function RuovafApp() {
       setActiveRole(tempRole);
       setIsAuthenticated(true);
       setTempRole(null);
+      
+      // Persistence
+      localStorage.setItem('ruovaf_couple', coupleName);
+      localStorage.setItem('ruovaf_role', tempRole);
+      localStorage.setItem('ruovaf_auth', 'true');
+
       toast({ title: "Heart Connected", description: `Welcome, ${tempRole === 'afu' ? 'Afu' : 'Ruovaf'}!` });
     } else {
       // Existing user login
@@ -188,6 +229,12 @@ export default function RuovafApp() {
         setActiveRole(tempRole);
         setIsAuthenticated(true);
         setTempRole(null);
+        
+        // Persistence
+        localStorage.setItem('ruovaf_couple', coupleName);
+        localStorage.setItem('ruovaf_role', tempRole);
+        localStorage.setItem('ruovaf_auth', 'true');
+
         updateDocumentNonBlocking(roleRef, { lastLoginAt: serverTimestamp() });
       } else {
         toast({ variant: "destructive", title: "Access Denied", description: "Incorrect password." });
@@ -217,6 +264,9 @@ export default function RuovafApp() {
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('ruovaf_couple');
+    localStorage.removeItem('ruovaf_role');
+    localStorage.removeItem('ruovaf_auth');
     setActiveRole(null);
     setIsAuthenticated(false);
     setAiPrompt(null);
@@ -224,7 +274,6 @@ export default function RuovafApp() {
     setIsCoupleSet(false);
   };
 
-  // Initial Auth Check Loading
   if (isUserLoading) return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-4">
@@ -234,7 +283,6 @@ export default function RuovafApp() {
     </div>
   );
 
-  // Initial Couple Selection
   if (!isCoupleSet) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
@@ -257,7 +305,10 @@ export default function RuovafApp() {
             <Button 
               className="w-full h-14 text-xl rounded-2xl shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all" 
               disabled={!coupleName}
-              onClick={() => setIsCoupleSet(true)}
+              onClick={() => {
+                localStorage.setItem('ruovaf_couple', coupleName);
+                setIsCoupleSet(true);
+              }}
             >
               Enter Shared Journey
             </Button>
@@ -267,7 +318,6 @@ export default function RuovafApp() {
     );
   }
 
-  // Role Selection & Login Screen
   if (!isAuthenticated) {
     const roleLoading = tempRole === 'afu' ? isAfuLoading : isRuovafLoading;
     const targetData = tempRole === 'afu' ? afuData : ruovafData;
@@ -384,12 +434,15 @@ export default function RuovafApp() {
 
   const currentPartner = activeRole === 'afu' ? afuData : ruovafData;
   const otherPartner = activeRole === 'afu' ? ruovafData : afuData;
-  const myTodayCount = currentPartner?.currentSmileCount || 0;
-  const otherTodayCount = otherPartner?.currentSmileCount || 0;
+  const todayStr = getTodayStr();
+
+  // Reset local counts if the day has changed but UI hasn't re-synced yet
+  const myTodayCount = currentPartner?.lastUpdateDate === todayStr ? (currentPartner?.currentSmileCount || 0) : 0;
+  const otherTodayCount = otherPartner?.lastUpdateDate === todayStr ? (otherPartner?.currentSmileCount || 0) : 0;
 
   return (
     <div className="min-h-screen bg-background pb-20">
-      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-md border-b px-4 h-16 flex items-center justify-between shadow-sm">
+      <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b px-4 h-16 flex items-center justify-between shadow-sm">
         <Button variant="ghost" size="icon" onClick={handleLogout} className="rounded-full">
           <ArrowLeft className="w-5 h-5" />
         </Button>
@@ -417,7 +470,7 @@ export default function RuovafApp() {
         </section>
 
         {(aiPrompt || isLoadingPrompt) && (
-          <div className="fade-in">
+          <div className="fade-in px-2">
             <Card className="border-none shadow-xl bg-primary/5 rounded-3xl overflow-hidden border-l-4 border-l-primary">
               <CardContent className="p-6">
                 <div className="flex items-start gap-4">
@@ -502,7 +555,7 @@ export default function RuovafApp() {
                 <ScrollArea className="h-72 px-6 pb-6">
                   <div className="space-y-4">
                     {smileHistory?.map((record) => (
-                      <div key={record.recordDate} className="flex items-center justify-between py-4 border-b border-primary/5 last:border-none group">
+                      <div key={record.id} className="flex items-center justify-between py-4 border-b border-primary/5 last:border-none group">
                         <div className="space-y-1">
                           <p className="font-bold text-foreground/80">{new Date(record.recordDate).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}</p>
                           <p className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Daily Total</p>
