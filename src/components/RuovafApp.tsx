@@ -58,6 +58,18 @@ export default function RuovafApp() {
   const [passwordInput, setPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
 
+  // Cameroon Timezone Reset Logic (WAT, UTC+1)
+  const getTodayStr = () => {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Douala',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date());
+  };
+
+  const todayStr = getTodayStr();
+
   // Load persistence on mount
   useEffect(() => {
     const storedCouple = localStorage.getItem('ruovaf_couple');
@@ -105,16 +117,6 @@ export default function RuovafApp() {
   }, [db, activeRole, coupleName, user]);
   const { data: smileHistory } = useCollection(historyQuery);
 
-  // Cameroon Timezone Reset Logic (WAT, UTC+1)
-  const getTodayStr = () => {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Africa/Douala',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    }).format(new Date());
-  };
-
   const handleIncrement = async () => {
     if (!activeRole || !isAuthenticated || !coupleName || !user) return;
 
@@ -148,14 +150,15 @@ export default function RuovafApp() {
 
     // AI Loving Thought Generation
     setIsLoadingPrompt(true);
-    setAiPrompt(null); // Clear previous to show loading state
     try {
       const result = await generateLovingPrompt({});
       if (result && result.prompt) {
         setAiPrompt(result.prompt);
+      } else {
+        setAiPrompt("Every smile shared is a step closer together. ❤️");
       }
     } catch (error) {
-      console.error("AI Generation failed:", error);
+      setAiPrompt("Thinking of you and your partner makes the world a little brighter. ❤️");
     } finally {
       setIsLoadingPrompt(false);
     }
@@ -181,7 +184,7 @@ export default function RuovafApp() {
 
   const handleAuth = () => {
     if (!tempRole || !user) {
-      toast({ variant: "destructive", title: "Wait", description: "Connecting to heart... please try again in a moment." });
+      toast({ variant: "destructive", title: "Wait", description: "Connecting... please try again in a moment." });
       return;
     }
     
@@ -222,7 +225,7 @@ export default function RuovafApp() {
       localStorage.setItem('ruovaf_role', tempRole);
       localStorage.setItem('ruovaf_auth', 'true');
 
-      toast({ title: "Heart Connected", description: `Welcome, ${tempRole === 'afu' ? 'Afu' : 'Ruovaf'}!` });
+      toast({ title: "Welcome", description: `Account initialized for ${tempRole === 'afu' ? 'Afu' : 'Ruovaf'}!` });
     } else {
       // Existing user login
       if (passwordInput === roleData.password) {
@@ -287,11 +290,11 @@ export default function RuovafApp() {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
         <div className="max-w-md w-full space-y-10 fade-in text-center">
-          <div className="mx-auto bg-primary/5 w-40 h-40 rounded-full flex items-center justify-center shadow-inner">
-            <Heart className="w-20 h-20 text-primary animate-pulse fill-primary/10" />
+          <div className="mx-auto bg-primary/5 w-32 h-32 rounded-full flex items-center justify-center shadow-inner">
+            <Heart className="w-16 h-16 text-primary animate-pulse fill-primary/10" />
           </div>
           <div className="space-y-2">
-            <h1 className="text-4xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
             <p className="text-muted-foreground">Enter your shared Couple Name to enter your journey.</p>
           </div>
           <div className="space-y-4">
@@ -333,8 +336,8 @@ export default function RuovafApp() {
           </header>
           
           <div className="text-center space-y-4">
-            <div className="mx-auto bg-primary/5 w-32 h-32 rounded-full flex items-center justify-center shadow-inner">
-              <Heart className="w-16 h-16 text-primary fill-primary/10" />
+            <div className="mx-auto bg-primary/5 w-28 h-28 rounded-full flex items-center justify-center shadow-inner">
+              <Heart className="w-14 h-14 text-primary fill-primary/10" />
             </div>
             <div className="space-y-1">
               <h1 className="text-3xl font-bold tracking-tight text-primary">Afu & Ruovaf</h1>
@@ -434,9 +437,7 @@ export default function RuovafApp() {
 
   const currentPartner = activeRole === 'afu' ? afuData : ruovafData;
   const otherPartner = activeRole === 'afu' ? ruovafData : afuData;
-  const todayStr = getTodayStr();
 
-  // Reset local counts if the day has changed but UI hasn't re-synced yet
   const myTodayCount = currentPartner?.lastUpdateDate === todayStr ? (currentPartner?.currentSmileCount || 0) : 0;
   const otherTodayCount = otherPartner?.lastUpdateDate === todayStr ? (otherPartner?.currentSmileCount || 0) : 0;
 
